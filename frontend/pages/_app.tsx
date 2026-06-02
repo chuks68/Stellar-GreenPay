@@ -4,6 +4,7 @@ import Head from "next/head";
 import { Toaster } from "sonner";
 import Navbar from "@/components/Navbar";
 import { PriceProvider } from "@/lib/priceContext";
+import { I18nProvider } from "@/lib/i18n";
 import { connectWallet, getConnectedPublicKey } from "@/lib/wallet";
 import "@/styles/globals.css";
 
@@ -30,7 +31,7 @@ export default function App({ Component, pageProps }: AppProps) {
   };
 
   return (
-    <>
+    <I18nProvider>
       <Head>
         <title>Stellar GreenPay — Climate Donations on Stellar</title>
         <meta name="description" content="Donate XLM directly to verified climate projects. Every transaction tracked on-chain via Soroban smart contracts." />
@@ -43,6 +44,6 @@ export default function App({ Component, pageProps }: AppProps) {
           <Component {...pageProps} publicKey={publicKey} onConnect={handleConnect} />
         </main>
       </div>
-    </>
+    </I18nProvider>
   );
 }

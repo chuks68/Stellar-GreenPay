@@ -11,7 +11,8 @@ import WalletConnect from "@/components/WalletConnect";
 import CircularProgress from "@/components/CircularProgress";
 import MonthlyGivingSetup from "@/components/MonthlyGivingSetup";
 import DescriptionAccordion from "@/components/DescriptionAccordion";
-import { fetchProject, fetchProjectUpdates, subscribeToProject, fetchSubscriberCount, createProjectCampaign, fetchProjectMatches, generateProjectSummary } from "@/lib/api";
+import { fetchProject, fetchProjectUpdates, subscribeToProject, fetchSubscriberCount, createProjectCampaign, fetchProjectMatches, generateProjectSummary, toggleUpdateLike } from "@/lib/api";
+import { useI18n } from "@/lib/i18n";
 import { formatXLM, formatCO2, progressPercent, timeAgo, statusClass, statusLabel, CATEGORY_ICONS, copyToClipboard, shortenAddress } from "@/utils/format";
 import { accountUrl, fetchProjectDiscussion, type ProjectDiscussionMessage } from "@/lib/stellar";
 import { markMonthlySubscriptionPaid } from "@/lib/monthlyGiving";
@@ -34,9 +35,11 @@ export default function ProjectDetail({
 }: ProjectDetailProps) {
   const router = useRouter();
   const { id } = router.query;
+  const { t } = useI18n();
 
   const [project, setProject] = useState<ClimateProject | null>(null);
   const [updates, setUpdates] = useState<ProjectUpdate[]>([]);
+  const [updateLikes, setUpdateLikes] = useState<Record<string, { liked: boolean; likeCount: number }>>({});
   const [loading, setLoading] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
@@ -122,6 +125,16 @@ export default function ProjectDetail({
     } else {
       setCopyState("error");
       setTimeout(() => setCopyState("idle"), 2000);
+    }
+  };
+
+  const handleToggleLike = async (updateId: string) => {
+    if (!publicKey) return;
+    try {
+      const result = await toggleUpdateLike(updateId, publicKey);
+      setUpdateLikes((prev) => ({ ...prev, [updateId]: result }));
+    } catch {
+      // silently fail
     }
   };
 
@@ -660,7 +673,7 @@ export default function ProjectDetail({
   else analogy = "A massive impact for our planet! 🌍";
 
   return (
-    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10 animate-fade-in">
+    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10 pb-24 sm:pb-10 animate-fade-in">
       <ToastNotification
         toasts={toasts}
         onDismiss={(toastId) => setToasts((prev) => prev.filter((t) => t.id !== toastId))}
@@ -879,7 +892,7 @@ export default function ProjectDetail({
             </div>
 
             {/* Stats row */}
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {[
                 {
                   icon: "👥",
@@ -1254,33 +1267,53 @@ export default function ProjectDetail({
           </div>
 
           {/* Project updates */}
-          {updates.length > 0 && (
-            <div className="card">
-              <h2 className="font-display text-lg font-semibold text-forest-900 mb-4">
-                Project Updates
-              </h2>
+          <div className="card">
+            <h2 className="font-display text-lg font-semibold text-forest-900 mb-4">
+              {t("project.projectUpdates")}
+            </h2>
+            {updates.length === 0 ? (
+              <p className="text-sm text-[#5a7a5a] font-body">{t("project.noUpdatesYet")}</p>
+            ) : (
               <div className="space-y-4">
-                {updates.map((u) => (
-                  <div
-                    key={u.id}
-                    className="pb-4 border-b border-forest-100 last:border-0 last:pb-0"
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <h3 className="font-semibold text-forest-900 text-sm font-body">
-                        {u.title}
-                      </h3>
-                      <span className="text-xs text-[#8aaa8a] font-body">
-                        {timeAgo(u.createdAt)}
-                      </span>
+                {updates.map((u) => {
+                  const like = updateLikes[u.id];
+                  return (
+                    <div
+                      key={u.id}
+                      className="pb-4 border-b border-forest-100 last:border-0 last:pb-0"
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <h3 className="font-semibold text-forest-900 text-sm font-body">
+                          {u.title}
+                        </h3>
+                        <span className="text-xs text-[#8aaa8a] font-body">
+                          {timeAgo(u.createdAt)}
+                        </span>
+                      </div>
+                      <div
+                        className="text-[#5a7a5a] text-sm leading-relaxed font-body prose prose-sm max-w-none"
+                        dangerouslySetInnerHTML={{ __html: renderMarkdown(u.body) }}
+                      />
+                      <div className="flex items-center gap-3 mt-2">
+                        <button
+                          onClick={() => handleToggleLike(u.id)}
+                          disabled={!publicKey}
+                          className={`flex items-center gap-1.5 text-xs font-body transition-colors ${
+                            like?.liked
+                              ? "text-red-500 font-semibold"
+                              : "text-[#8aaa8a] hover:text-red-400"
+                          } disabled:opacity-50`}
+                        >
+                          <span>{like?.liked ? "❤️" : "🤍"}</span>
+                          <span>{like?.likeCount ?? 0}</span>
+                        </button>
+                      </div>
                     </div>
-                    <p className="text-[#5a7a5a] text-sm leading-relaxed font-body">
-                      {u.body}
-                    </p>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
           {/* Donation feed */}
           <div className="card">
@@ -1366,7 +1399,21 @@ export default function ProjectDetail({
 
         {/* ── Sidebar ─────────────────────────────────────────────────── */}
         <div className="space-y-4">
-          
+
+          {/* Sticky mobile donate button */}
+          <div className="fixed bottom-0 left-0 right-0 z-40 p-3 bg-white/95 backdrop-blur-sm border-t border-forest-200 sm:hidden">
+            {publicKey ? (
+              <a
+                href="#donate-form"
+                className="btn-primary w-full text-center text-sm py-3 block"
+              >
+                Donate to {project.name}
+              </a>
+            ) : (
+              <WalletConnect onConnect={onConnect} />
+            )}
+          </div>
+
           {/* Impact Calculator */}
           <div className="card bg-forest-50 border-forest-200">
             <h3 className="font-display font-semibold text-forest-900 mb-2">Impact Calculator</h3>
@@ -1415,6 +1462,7 @@ export default function ProjectDetail({
           </div>
 
           {publicKey ? (
+            <div id="donate-form">
             <DonateForm
               project={project}
               publicKey={publicKey}
@@ -1440,6 +1488,7 @@ export default function ProjectDetail({
                 );
               }}
             />
+            </div>
           ) : (
             <div>
               <p className="text-center text-[#5a7a5a] text-sm mb-4 font-body">
@@ -1562,6 +1611,21 @@ export default function ProjectDetail({
       )}
     </div>
   );
+}
+
+/** Simple markdown-to-HTML: bold, italic, links, line breaks. */
+function renderMarkdown(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*(.+?)\*/g, "<em>$1</em>")
+    .replace(
+      /\[([^\]]+)\]\(([^)]+)\)/g,
+      '<a href="$2" target="_blank" rel="noopener noreferrer" class="text-forest-600 hover:underline">$1</a>',
+    )
+    .replace(/\n/g, "<br />");
 }
 
 function formatCountdown(deadline: string, nowMs: number) {

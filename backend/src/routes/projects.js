@@ -572,4 +572,38 @@ router.get("/:id/matching", async (req, res, next) => {
   }
 });
 
+/**
+ * PATCH /api/projects/:id/status
+ * Approve or reject a project. Body: { status: "active" | "rejected", reason?: string }
+ * `adminAddress` must match the project wallet (owner) or be a platform admin.
+ */
+router.patch("/:id/status", async (req, res, next) => {
+  try {
+    const { status, reason, adminAddress } = req.body || {};
+    const validStatuses = ["active", "rejected", "paused"];
+    if (!status || !validStatuses.includes(status)) {
+      return res.status(400).json({ error: `status must be one of: ${validStatuses.join(", ")}` });
+    }
+
+    const projectResult = await pool.query("SELECT * FROM projects WHERE id = $1", [req.params.id]);
+    if (!projectResult.rows[0]) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    const result = await pool.query(
+      `UPDATE projects
+       SET status = $1,
+           rejection_reason = $2,
+           updated_at = NOW()
+       WHERE id = $3
+       RETURNING *`,
+      [status, reason || null, req.params.id],
+    );
+
+    res.json({ success: true, data: mapProjectRow(result.rows[0]) });
+  } catch (e) {
+    next(e);
+  }
+});
+
 module.exports = router;

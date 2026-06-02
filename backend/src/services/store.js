@@ -146,6 +146,7 @@ function mapProjectRow(row) {
     donorCount: row.donor_count,
     co2OffsetKg: row.co2_offset_kg,
     status: row.status,
+    rejectionReason: row.rejection_reason || null,
     verified: row.verified,
     onChainVerified: row.on_chain_verified,
     tags: row.tags || [],

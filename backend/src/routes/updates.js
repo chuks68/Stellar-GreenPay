@@ -23,13 +23,33 @@ function adminOnly(req, res, next) {
 // GET /api/updates/:projectId
 router.get("/:projectId", async (req, res, next) => {
   try {
-    const result = await pool.query(
-      `SELECT * FROM project_updates
-       WHERE project_id = $1
-       ORDER BY created_at DESC`,
-      [req.params.projectId],
-    );
-    res.json({ success: true, data: result.rows.map(mapProjectUpdateRow) });
+    const { cursor, limit = 20 } = req.query;
+    const parsedLimit = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 100);
+
+    let query;
+    let params;
+
+    if (cursor) {
+      query = `SELECT * FROM project_updates
+               WHERE project_id = $1 AND created_at < $2
+               ORDER BY created_at DESC
+               LIMIT $3`;
+      params = [req.params.projectId, cursor, parsedLimit + 1];
+    } else {
+      query = `SELECT * FROM project_updates
+               WHERE project_id = $1
+               ORDER BY created_at DESC
+               LIMIT $2`;
+      params = [req.params.projectId, parsedLimit + 1];
+    }
+
+    const result = await pool.query(query, params);
+    const rows = result.rows;
+    const hasMore = rows.length > parsedLimit;
+    const data = rows.slice(0, parsedLimit).map(mapProjectUpdateRow);
+    const nextCursor = hasMore && data.length > 0 ? data[data.length - 1].createdAt : null;
+
+    res.json({ success: true, data, nextCursor });
   } catch (e) {
     next(e);
   }
@@ -77,6 +97,88 @@ router.post("/", adminOnly, async (req, res, next) => {
     });
 
     res.status(201).json({ success: true, data: update });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// POST /api/updates/:updateId/like — toggle like
+router.post("/:updateId/like", async (req, res, next) => {
+  try {
+    const { donorAddress } = req.body || {};
+    if (!donorAddress || typeof donorAddress !== "string") {
+      return res.status(400).json({ error: "donorAddress is required" });
+    }
+
+    const updateResult = await pool.query(
+      "SELECT id FROM project_updates WHERE id = $1",
+      [req.params.updateId],
+    );
+    if (!updateResult.rows[0]) {
+      return res.status(404).json({ error: "Update not found" });
+    }
+
+    // Check if already liked
+    const existing = await pool.query(
+      "SELECT id FROM update_likes WHERE update_id = $1 AND donor_address = $2",
+      [req.params.updateId, donorAddress],
+    );
+
+    if (existing.rows[0]) {
+      // Unlike
+      await pool.query(
+        "DELETE FROM update_likes WHERE update_id = $1 AND donor_address = $2",
+        [req.params.updateId, donorAddress],
+      );
+    } else {
+      // Like
+      await pool.query(
+        "INSERT INTO update_likes (id, update_id, donor_address, created_at) VALUES ($1, $2, $3, NOW())",
+        [require("uuid").v4(), req.params.updateId, donorAddress],
+      );
+    }
+
+    // Get updated like count
+    const countResult = await pool.query(
+      "SELECT COUNT(*) as count FROM update_likes WHERE update_id = $1",
+      [req.params.updateId],
+    );
+
+    res.json({
+      success: true,
+      data: {
+        liked: !existing.rows[0],
+        likeCount: parseInt(countResult.rows[0].count),
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// GET /api/updates/:updateId/likes — get like count and user's like status
+router.get("/:updateId/likes", async (req, res, next) => {
+  try {
+    const { donorAddress } = req.query;
+    const countResult = await pool.query(
+      "SELECT COUNT(*) as count FROM update_likes WHERE update_id = $1",
+      [req.params.updateId],
+    );
+    let liked = false;
+    if (donorAddress) {
+      const existing = await pool.query(
+        "SELECT id FROM update_likes WHERE update_id = $1 AND donor_address = $2",
+        [req.params.updateId, donorAddress],
+      );
+      liked = !!existing.rows[0];
+    }
+    res.json({
+      success: true,
+      data: {
+        likeCount: parseInt(countResult.rows[0].count),
+        liked,
+      },
+    });
   } catch (e) {
     next(e);
   }
