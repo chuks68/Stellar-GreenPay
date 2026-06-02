@@ -265,6 +265,63 @@ export async function fetchGlobalStats(): Promise<GlobalStats> {
   return data.data;
 }
 
+// ── Admin: Project Approval ──────────────────────────────────────
+export async function updateProjectStatus(
+  projectId: string,
+  status: "active" | "rejected" | "paused",
+  reason?: string,
+) {
+  const { data } = await api.patch<{ success: boolean; data: ClimateProject }>(
+    `/api/projects/${projectId}/status`,
+    { status, reason },
+  );
+  return data.data;
+}
+
+export async function registerProjectOnChain(payload: {
+  projectId: string;
+  name: string;
+  wallet: string;
+  co2PerXLM: number;
+  adminAddress: string;
+}) {
+  const { data } = await api.post<{ success: boolean; xdr: string }>(
+    "/api/projects/admin/register",
+    payload,
+  );
+  return data;
+}
+
+export async function confirmProjectRegistration(payload: {
+  projectId: string;
+  transactionHash: string;
+}) {
+  const { data } = await api.post<{ success: boolean; data: ClimateProject }>(
+    "/api/projects/admin/confirm",
+    payload,
+  );
+  return data;
+}
+
+// ── Update Likes ─────────────────────────────────────────────────
+export async function toggleUpdateLike(updateId: string, donorAddress: string) {
+  const { data } = await api.post<{ success: boolean; data: { liked: boolean; likeCount: number } }>(
+    `/api/updates/${updateId}/like`,
+    { donorAddress },
+  );
+  return data.data;
+}
+
+export async function fetchUpdateLikes(updateId: string, donorAddress?: string) {
+  const params: Record<string, string> = {};
+  if (donorAddress) params.donorAddress = donorAddress;
+  const { data } = await api.get<{ success: boolean; data: { liked: boolean; likeCount: number } }>(
+    `/api/updates/${updateId}/likes`,
+    { params },
+  );
+  return data.data;
+}
+
 // ── Featured Project ─────────────────────────────────────────────
 export async function fetchFeaturedProject(): Promise<ClimateProject | null> {
   try {

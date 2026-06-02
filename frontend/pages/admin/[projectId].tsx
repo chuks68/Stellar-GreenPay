@@ -3,7 +3,7 @@ import { useRouter } from "next/router";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import WalletConnect from "@/components/WalletConnect";
-import { createProjectUpdate, fetchProject, fetchProjectDonations } from "@/lib/api";
+import { createProjectUpdate, fetchProject, fetchProjectDonations, updateProjectStatus, registerProjectOnChain, confirmProjectRegistration, fetchProjectMatches } from "@/lib/api";
 import { buildMilestoneTransaction, submitTransaction } from "@/lib/stellar";
 import { formatCO2, formatXLM, shortenAddress, timeAgo } from "@/utils/format";
 import type { ClimateProject, Donation } from "@/utils/types";
@@ -49,6 +49,15 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
   const [newMilestonePercentage, setNewMilestonePercentage] = useState<number>(25);
   const [milestoneActionState, setMilestoneActionState] = useState<"idle" | "loading" | "success" | "error">("idle");
 
+  const [approvalState, setApprovalState] = useState<"idle" | "loading" | "success" | "error">("idle");
+  const [approvalMessage, setApprovalMessage] = useState<string | null>(null);
+  const [rejectionReason, setRejectionReason] = useState("");
+
+  const [onChainState, setOnChainState] = useState<"idle" | "loading" | "success" | "error">("idle");
+  const [onChainMessage, setOnChainMessage] = useState<string | null>(null);
+
+  const [matches, setMatches] = useState<any[]>([]);
+
   useEffect(() => {
     if (!projectId || typeof projectId !== "string") return;
     setLoading(true);
@@ -58,11 +67,13 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
       fetchProject(projectId),
       fetchProjectDonations(projectId, 200).then((r) => r.donations),
       fetch(`${process.env.NEXT_PUBLIC_API_URL || "/api"}/projects/${projectId}/milestones`).then(r => r.json()),
+      fetchProjectMatches(projectId).catch(() => []),
     ])
-      .then(([p, d, m]) => {
+      .then(([p, d, m, mt]) => {
         setProject(p);
         setDonations(d);
         setMilestones(m.data || []);
+        setMatches(mt);
       })
       .catch((e: unknown) => setError((e as Error).message || "Failed to load project"))
       .finally(() => setLoading(false));
@@ -189,6 +200,70 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
     } catch (e: any) {
       alert(e.message);
       setMilestoneActionState("error");
+    }
+  };
+
+  const handleApprove = async () => {
+    if (!project) return;
+    setApprovalState("loading");
+    setApprovalMessage(null);
+    try {
+      const updated = await updateProjectStatus(project.id, "active");
+      setProject(updated);
+      setApprovalMessage("Project approved successfully");
+      setApprovalState("success");
+      setTimeout(() => setApprovalState("idle"), 3000);
+    } catch (e: any) {
+      setApprovalMessage(e.message || "Failed to approve project");
+      setApprovalState("error");
+    }
+  };
+
+  const handleReject = async () => {
+    if (!project || !rejectionReason.trim()) return;
+    setApprovalState("loading");
+    setApprovalMessage(null);
+    try {
+      const updated = await updateProjectStatus(project.id, "rejected", rejectionReason.trim());
+      setProject(updated);
+      setApprovalMessage("Project rejected");
+      setApprovalState("success");
+      setRejectionReason("");
+      setTimeout(() => setApprovalState("idle"), 3000);
+    } catch (e: any) {
+      setApprovalMessage(e.message || "Failed to reject project");
+      setApprovalState("error");
+    }
+  };
+
+  const handleRegisterOnChain = async () => {
+    if (!project || !publicKey) return;
+    setOnChainState("loading");
+    setOnChainMessage(null);
+    try {
+      const result = await registerProjectOnChain({
+        projectId: project.id,
+        name: project.name,
+        wallet: project.walletAddress,
+        co2PerXLM: project.co2_per_xlm || 0,
+        adminAddress: publicKey,
+      });
+      // Sign the XDR with wallet
+      const { signedXDR } = await (window as any).stellarWallets.signTransaction(result.xdr);
+      const txResult = await (await import("@/lib/stellar")).submitTransaction(signedXDR);
+      // Confirm registration on backend
+      await confirmProjectRegistration({
+        projectId: project.id,
+        transactionHash: txResult.hash,
+      });
+      const refreshed = await fetchProject(project.id);
+      setProject(refreshed);
+      setOnChainMessage("Project registered on-chain");
+      setOnChainState("success");
+      setTimeout(() => setOnChainState("idle"), 3000);
+    } catch (e: any) {
+      setOnChainMessage(e.message || "Failed to register on-chain");
+      setOnChainState("error");
     }
   };
 
@@ -446,6 +521,137 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
             </button>
           </div>
         </div>
+      </div>
+
+      {/* Approval Workflow */}
+      <div className="card mt-6">
+        <h2 className="font-display text-xl font-bold text-forest-900 mb-2">Approval Workflow</h2>
+        <p className="text-sm text-[#5a7a5a] font-body mb-4">
+          Manage project status. Current status:{" "}
+          <span className={`font-semibold ${project.status === "active" ? "text-emerald-600" : project.status === "rejected" ? "text-red-600" : "text-amber-600"}`}>
+            {project.status}
+          </span>
+        </p>
+
+        {project.rejectionReason && (
+          <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm font-body mb-4">
+            <strong>Rejection reason:</strong> {project.rejectionReason}
+          </div>
+        )}
+
+        {approvalMessage && (
+          <div className={`p-3 rounded-xl text-sm font-body mb-4 ${approvalState === "success" ? "bg-green-50 border border-green-200 text-green-700" : "bg-red-50 border border-red-200 text-red-600"}`}>
+            {approvalMessage}
+          </div>
+        )}
+
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs font-bold text-forest-800 uppercase tracking-widest mb-1 ml-1 opacity-50">
+              Reason for rejection (required)
+            </label>
+            <textarea
+              value={rejectionReason}
+              onChange={(e) => setRejectionReason(e.target.value)}
+              className="input-field min-h-[80px]"
+              placeholder="Provide a reason for this decision..."
+              maxLength={500}
+            />
+          </div>
+          <div className="flex gap-3">
+            <button
+              onClick={handleApprove}
+              disabled={approvalState === "loading" || project.status === "active"}
+              className="btn-primary flex-1 disabled:opacity-50"
+            >
+              {approvalState === "loading" ? "Processing…" : "Approve"}
+            </button>
+            <button
+              onClick={handleReject}
+              disabled={approvalState === "loading" || !rejectionReason.trim() || project.status === "rejected"}
+              className="flex-1 bg-red-600 hover:bg-red-700 text-white font-semibold px-6 py-3 rounded-xl transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {approvalState === "loading" ? "Processing…" : "Reject"}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* On-Chain Registration */}
+      <div className="card mt-6">
+        <h2 className="font-display text-xl font-bold text-forest-900 mb-2">On-Chain Registration</h2>
+        <p className="text-sm text-[#5a7a5a] font-body mb-4">
+          Register this project on the Stellar blockchain via Soroban smart contract.
+        </p>
+
+        {onChainMessage && (
+          <div className={`p-3 rounded-xl text-sm font-body mb-4 ${onChainState === "success" ? "bg-green-50 border border-green-200 text-green-700" : "bg-red-50 border border-red-200 text-red-600"}`}>
+            {onChainMessage}
+          </div>
+        )}
+
+        {project.onChainVerified ? (
+          <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm font-body">
+            ✓ This project is registered on-chain.
+          </div>
+        ) : (
+          <button
+            onClick={handleRegisterOnChain}
+            disabled={onChainState === "loading"}
+            className="btn-primary w-full disabled:opacity-50"
+          >
+            {onChainState === "loading" ? "Registering…" : "Register On-Chain"}
+          </button>
+        )}
+      </div>
+
+      {/* Donation Match Funds */}
+      <div className="card mt-6">
+        <h2 className="font-display text-xl font-bold text-forest-900 mb-2">Donation Match Funds</h2>
+        <p className="text-sm text-[#5a7a5a] font-body mb-4">
+          View and manage donation matching for this project.
+        </p>
+
+        {matches.length === 0 ? (
+          <p className="text-sm text-[#5a7a5a] font-body">No active donation matches.</p>
+        ) : (
+          <div className="space-y-3">
+            {matches.map((m: any) => (
+              <div key={m.id} className="p-4 rounded-xl border border-forest-100 bg-forest-50">
+                <div className="flex items-center justify-between mb-2">
+                  <div>
+                    <p className="text-sm font-semibold text-forest-900 font-body">
+                      {m.multiplier}x matching
+                    </p>
+                    <p className="text-xs text-[#8aaa8a] font-body">
+                      Matcher: {shortenAddress(m.matcherAddress)}
+                    </p>
+                  </div>
+                  <span className="text-xs px-2 py-1 rounded-full bg-green-100 border border-green-200 text-green-700 font-body">
+                    Active
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-3 mt-3">
+                  <div>
+                    <p className="text-[10px] uppercase tracking-widest font-bold text-forest-800 opacity-50">Cap (XLM)</p>
+                    <p className="text-sm font-semibold text-forest-900 font-body">{formatXLM(m.capXLM)}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] uppercase tracking-widest font-bold text-forest-800 opacity-50">Matched</p>
+                    <p className="text-sm font-semibold text-forest-900 font-body">{formatXLM(m.matchedXLM)}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] uppercase tracking-widest font-bold text-forest-800 opacity-50">Remaining</p>
+                    <p className="text-sm font-semibold text-forest-900 font-body">{formatXLM(m.remainingXLM)}</p>
+                  </div>
+                </div>
+                <p className="text-xs text-[#8aaa8a] font-body mt-2">
+                  Expires: {new Date(m.expiresAt).toLocaleDateString()}
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
