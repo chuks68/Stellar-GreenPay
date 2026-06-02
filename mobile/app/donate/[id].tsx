@@ -7,7 +7,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import axios from 'axios';
 import { Linking } from 'expo-linking';
-import { useTheme } from '../theme';
+import { getPushToken, registerDeviceToken } from '../../utils/notifications';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
 const HORIZON_URL = process.env.EXPO_PUBLIC_HORIZON_URL || 'https://horizon-testnet.stellar.org';
@@ -28,10 +28,25 @@ export default function DonateScreen() {
   const [currency, setCurrency] = useState<'XLM' | 'USDC'>('XLM');
   const [loading, setLoading] = useState(false);
   const [publicKey, setPublicKey] = useState('');
+  const [pushToken, setPushToken] = useState<string | null>(null);
 
   useEffect(() => {
     if (id) loadProject(id as string);
+    // Initialize push token on component mount
+    initializeNotifications();
   }, [id]);
+
+  const initializeNotifications = async () => {
+    try {
+      const token = await getPushToken();
+      if (token) {
+        setPushToken(token);
+        console.log('Push token obtained:', token);
+      }
+    } catch (error) {
+      console.error('Error initializing notifications:', error);
+    }
+  };
 
   const loadProject = async (projectId: string) => {
     try {
@@ -112,9 +127,19 @@ export default function DonateScreen() {
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'OK',
-          onPress: (input: any) => {
+          onPress: async (input: any) => {
             if (input && /^G[A-Z0-9]{55}$/.test(input)) {
               setPublicKey(input);
+              
+              // Register device token with backend when wallet connects
+              if (pushToken) {
+                try {
+                  await registerDeviceToken(pushToken, input);
+                  console.log('Device token registered with wallet address');
+                } catch (error) {
+                  console.error('Error registering device token:', error);
+                }
+              }
             } else {
               Alert.alert('Invalid Key', 'Please enter a valid Stellar public key');
             }
@@ -289,34 +314,45 @@ const styles = StyleSheet.create({
     margin: 16,
     padding: 20,
     borderRadius: 12,
-    borderWidth: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   label: {
     fontSize: 14,
     fontWeight: '600',
     marginBottom: 8,
   },
+  input: {
+    borderWidth: 1,
+    borderColor: '#e8f3e8',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+    marginBottom: 16,
+  },
   currencySelector: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 12,
     marginBottom: 16,
   },
   currencyButton: {
     flex: 1,
     padding: 12,
+    borderWidth: 1,
+    borderColor: '#e8f3e8',
     borderRadius: 8,
     alignItems: 'center',
+  },
+  currencyButtonActive: {
+    backgroundColor: '#227239',
+    borderColor: '#227239',
   },
   currencyButtonText: {
     fontSize: 14,
     fontWeight: '600',
-  },
-  input: {
-    borderWidth: 1,
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 16,
-    marginBottom: 16,
   },
   presets: {
     flexDirection: 'row',
@@ -327,7 +363,13 @@ const styles = StyleSheet.create({
   presetButton: {
     paddingHorizontal: 16,
     paddingVertical: 8,
-    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e8f3e8',
+    borderRadius: 20,
+  },
+  presetButtonActive: {
+    backgroundColor: '#227239',
+    borderColor: '#227239',
   },
   presetButtonText: {
     fontSize: 14,
@@ -340,7 +382,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   donateButtonDisabled: {
-    opacity: 0.6,
+    backgroundColor: '#8aaa8a',
   },
   donateButtonText: {
     fontSize: 18,
