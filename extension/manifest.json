@@ -9,6 +9,18 @@
   },
   "permissions": [
     "storage",
-    "activeTab"
-  ]
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["dist/content-script.js"],
+      "run_at": "document_end"
+    }
+  ],
+  "privacy_policy_url": "https://github.com/Emmy123222/Stellar-GreenPay/blob/main/PRIVACY.md"
 }

@@ -4,24 +4,27 @@
 import Link from "next/link";
 import { useRouter } from "next/router";
 import { shortenAddress } from "@/utils/format";
+import { useI18n } from "@/lib/i18n";
+import LanguageSwitcher from "@/components/LanguageSwitcher";
 import clsx from "clsx";
 
 interface NavbarProps { publicKey: string | null; onConnect: () => void; onDisconnect: () => void; }
 
-const links = [
-  { href: "/",            label: "Home" },
-  { href: "/projects",    label: "Projects" },
-  { href: "/jobs",        label: "Jobs" },
-  { href: "/bridge",      label: "Bridge" },
-  { href: "/impact",      label: "Impact" },
-  { href: "/leaderboard", label: "Leaderboard" },
-  { href: "/dashboard",   label: "My Impact" },
-];
-
 export default function Navbar({ publicKey, onConnect, onDisconnect }: NavbarProps) {
   const router = useRouter();
+  const { t } = useI18n();
   const network = (process.env.NEXT_PUBLIC_STELLAR_NETWORK || "testnet").toLowerCase();
   const isMainnet = network === "mainnet";
+
+  const links = [
+    { href: "/",            label: t("nav.home") },
+    { href: "/projects",    label: t("nav.projects") },
+    { href: "/jobs",        label: t("nav.jobs") },
+    { href: "/bridge",      label: t("nav.bridge") },
+    { href: "/impact",      label: t("nav.impact") },
+    { href: "/leaderboard", label: t("nav.leaderboard") },
+    { href: "/dashboard",   label: t("nav.myImpact") },
+  ];
 
   return (
     <nav className="sticky top-0 z-50 bg-white/90 backdrop-blur-xl border-b border-[rgba(34,114,57,0.12)] shadow-sm">
@@ -38,7 +41,7 @@ export default function Navbar({ publicKey, onConnect, onDisconnect }: NavbarPro
           </Link>
 
           <span className={`hidden md:inline-flex ${isMainnet ? "badge-verified" : "badge-paused"}`}>
-            {isMainnet ? "Mainnet" : "Testnet"}
+            {isMainnet ? t("nav.mainnet") : t("nav.testnet")}
           </span>
         </div>
 
@@ -57,6 +60,7 @@ export default function Navbar({ publicKey, onConnect, onDisconnect }: NavbarPro
         </div>
 
         <div className="flex items-center gap-2">
+          <LanguageSwitcher />
           {publicKey ? (
             <>
               <span className="address-tag flex items-center gap-1.5">
@@ -64,12 +68,12 @@ export default function Navbar({ publicKey, onConnect, onDisconnect }: NavbarPro
                 {shortenAddress(publicKey)}
               </span>
               <button onClick={onDisconnect} className="text-xs text-[#8aaa8a] hover:text-[#5a7a5a] transition-colors px-2">
-                Disconnect
+                {t("nav.disconnect")}
               </button>
             </>
           ) : (
             <button onClick={onConnect} className="btn-primary text-sm py-2 px-4">
-              Connect Wallet
+              {t("nav.connectWallet")}
             </button>
           )}
         </div>
