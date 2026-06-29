@@ -2,7 +2,6 @@
  * src/routes/projects.js
  */
 "use strict";
-const crypto = require("crypto");
 const express = require("express");
 const router = express.Router();
 const { v4: uuid } = require("uuid");
@@ -12,6 +11,10 @@ const { mapProjectRow, mapProjectMilestoneRow } = require("../services/store");
 const { getOnChainProject, CONTRACT_ID, server, NETWORK_PASSPHRASE } = require("../services/stellar");
 const { enqueueAISummary } = require("../services/summaryQueue");
 const { Contract, TransactionBuilder } = require("@stellar/stellar-sdk");
+const redis = require("../services/redis");
+
+const PROJECTS_LIST_CACHE_TTL = 60; // seconds
+const PROJECTS_LIST_CACHE_PREFIX = "projects:list:";
 
 const VALID_STATUSES = ["active", "completed", "paused"];
 const VALID_CATEGORIES = [
@@ -110,7 +113,15 @@ router.get("/featured", async (req, res, next) => {
 
 router.get("/", async (req, res, next) => {
   try {
-    const { category, status, verified, search, limit = 50 } = req.query;
+    const { category, status, verified, search, limit = 20, cursor } = req.query;
+    const pageSize = Math.min(Number.parseInt(limit, 10) || 20, 100);
+
+    const cacheKey = PROJECTS_LIST_CACHE_PREFIX + JSON.stringify({ category, status, verified, search, limit: pageSize, cursor: cursor || null });
+    const cached = await redis.get(cacheKey);
+    if (cached) {
+      return res.json(cached);
+    }
+
     const where = [];
     const values = [];
 
@@ -139,17 +150,48 @@ router.get("/", async (req, res, next) => {
       )`);
     }
 
-    values.push(Math.min(Number.parseInt(limit, 10) || 50, 100));
+    if (cursor) {
+      let cursorData;
+      try {
+        cursorData = JSON.parse(Buffer.from(cursor, "base64").toString("utf8"));
+      } catch {
+        return res.status(400).json({ error: "Invalid cursor" });
+      }
+      const { created_at, id } = cursorData;
+      if (!created_at || !id) {
+        return res.status(400).json({ error: "Invalid cursor" });
+      }
+      values.push(created_at, id);
+      const caIdx = values.length - 1;
+      const idIdx = values.length;
+      where.push(`(created_at < $${caIdx} OR (created_at = $${caIdx} AND id < $${idIdx}))`);
+    }
+
+    values.push(pageSize + 1);
+    const limitIdx = values.length;
 
     let query = "SELECT * FROM projects ";
     if (where.length) {
       query += "WHERE " + where.join(" AND ") + " ";
     }
-    query += "ORDER BY created_at DESC LIMIT $" + values.length;
+    query += `ORDER BY created_at DESC, id DESC LIMIT $${limitIdx}`;
 
+    // eslint-disable-next-line sql-injection/no-sql-injection
     const result = await pool.query(query, values);
+    const rows = result.rows;
+    const hasMore = rows.length > pageSize;
+    const data = rows.slice(0, pageSize).map(mapProjectRow);
 
-    res.json({ success: true, data: result.rows.map(mapProjectRow) });
+    let nextCursor = null;
+    if (hasMore) {
+      const last = rows[pageSize - 1];
+      nextCursor = Buffer.from(JSON.stringify({ created_at: last.created_at, id: last.id })).toString("base64");
+    }
+
+    const responseBody = { success: true, data, next_cursor: nextCursor, has_more: hasMore };
+    await redis.set(cacheKey, responseBody, PROJECTS_LIST_CACHE_TTL);
+
+    res.json(responseBody);
   } catch (e) {
     next(e);
   }
@@ -348,13 +390,13 @@ router.post("/admin/register", async (req, res) => {
     const contract = new Contract(CONTRACT_ID);
     const sourceAccount = await server.loadAccount(adminAddress);
 
-    const tx = new TransactionBuilder(sourceAccount, { 
-      fee: "1000", 
-      networkPassphrase: NETWORK_PASSPHRASE 
+    const tx = new TransactionBuilder(sourceAccount, {
+      fee: "1000",
+      networkPassphrase: NETWORK_PASSPHRASE,
     })
-    .addOperation(contract.call("register_project", adminAddress, projectId, name, wallet, parseInt(co2PerXLM)))
-    .setTimeout(30)
-    .build();
+      .addOperation(contract.call("register_project", adminAddress, projectId, name, wallet, parseInt(co2PerXLM)))
+      .setTimeout(30)
+      .build();
 
     logAdminAction({
       actor: adminAddress,
@@ -638,6 +680,8 @@ router.patch("/:id/status", async (req, res, next) => {
       metadata: { previousStatus: projectResult.rows[0].status, reason },
       ipAddress: req.ip,
     });
+
+    await redis.deletePattern(PROJECTS_LIST_CACHE_PREFIX + "*");
 
     res.json({ success: true, data: mapProjectRow(result.rows[0]) });
   } catch (e) {

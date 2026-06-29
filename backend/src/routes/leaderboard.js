@@ -31,6 +31,7 @@ router.get("/", async (req, res, next) => {
       LIMIT $1
     `;
 
+    // eslint-disable-next-line sql-injection/no-sql-injection
     const result = await pool.query(query, [limit]);
     const entries = result.rows.map((p, i) => ({
       rank: i + 1,

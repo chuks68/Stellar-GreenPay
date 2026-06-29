@@ -155,8 +155,8 @@ export default function SubmitProjectPage() {
           documentUrl: form.co2DocumentUrl,
         },
       };
-      const { data } = await (api as any).post("/api/projects", payload);
-      setReviewTimeline(data?.data?.reviewTimeline ?? "5–10 business days");
+      const data = await submitProject(payload);
+      setReviewTimeline(data?.reviewTimeline ?? "5–10 business days");
       setStep("done");
     } catch (err: any) {
       const msg =
@@ -184,7 +184,7 @@ export default function SubmitProjectPage() {
         </p>
         <p className="text-[#5a7a5a] font-body mb-8">
           Our team will review your submission within{" "}
-          <strong>{reviewTimeline || "5–10 business days"}</strong>. We'll contact you at{" "}
+          <strong>{reviewTimeline || "5–10 business days"}</strong>. We&apos;ll contact you at{" "}
           <strong>{form.contactEmail}</strong> with the outcome.
         </p>
         <button className="btn-primary" onClick={() => router.push("/projects")}>
