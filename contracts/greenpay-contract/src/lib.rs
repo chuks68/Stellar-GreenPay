@@ -323,6 +323,7 @@ impl GreenPayContract {
             (symbol_short!("donated"), donor, project_id),
             (amount, donor_stats.badge.clone(), msg_hash),
         );
+        env.storage().instance().extend_ttl(VOTING_WINDOW_LEDGERS * 4, VOTING_WINDOW_LEDGERS * 4);
     }
 
     // ─── Getters ─────────────────────────────────────────────────────────────
